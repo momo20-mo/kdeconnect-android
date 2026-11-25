@@ -1,0 +1,95 @@
+name: Check upstream tag daily
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: check-upstream-tag
+  cancel-in-progress: false
+
+jobs:
+  check-upstream-tag:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPOSITORY: ${{ vars.UPSTREAM_REPOSITORY || 'KDE/kdeconnect-android' }}
+
+    steps:
+      - name: Compare latest upstream and local tags
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream_refs="$(git ls-remote --tags --refs "https://github.com/${UPSTREAM_REPOSITORY}.git")"
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)"
+          local_refs="$(git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth_header" \
+            ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git")"
+
+          UPSTREAM_REFS="$upstream_refs" LOCAL_REFS="$local_refs" python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          TAG_RE = re.compile(r"^v?(\d+(?:\.\d+)+)(?:[.-]([0-9A-Za-z.-]+))?$")
+
+          def suffix_key(suffix: str):
+              return tuple(
+                  (0, int(part)) if part.isdigit() else (1, part.lower())
+                  for part in re.split(r"(\d+)", suffix)
+                  if part
+              )
+
+          def parse_latest_tag(ls_remote_output: str):
+              candidates = []
+              for line in ls_remote_output.splitlines():
+                  parts = line.split(None, 1)
+                  if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+                      continue
+                  raw_tag = parts[1][len("refs/tags/"):]
+                  match = TAG_RE.match(raw_tag)
+                  if not match:
+                      continue
+                  nums = tuple(int(x) for x in match.group(1).split("."))
+                  suffix = match.group(2)
+                  normalized = f"{match.group(1)}-{suffix}" if suffix else match.group(1)
+                  # Release tags without a suffix rank higher than prerelease/fork tags of the same base version.
+                  sort_key = (nums, 1 if suffix is None else 0, suffix_key(suffix) if suffix else ())
+                  candidates.append((sort_key, raw_tag, normalized))
+              if not candidates:
+                  return None
+              return max(candidates, key=lambda item: item[0])
+
+          upstream = parse_latest_tag(os.environ.get("UPSTREAM_REFS", ""))
+          local = parse_latest_tag(os.environ.get("LOCAL_REFS", ""))
+
+          if upstream is None:
+              print("::error::No version tags found in upstream repository.", file=sys.stderr)
+              sys.exit(1)
+
+          upstream_raw, upstream_norm = upstream[1], upstream[2]
+          local_raw = local[1] if local else ""
+          local_norm = local[2] if local else ""
+          changed = upstream_norm != local_norm
+
+          print(f"Upstream latest tag: {upstream_raw} (normalized: {upstream_norm})")
+          print(f"Local latest tag: {local_raw or '<none>'} (normalized: {local_norm or '<none>'})")
+          print(f"Tag mismatch: {changed}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"upstream_tag={upstream_raw}\n")
+              fh.write(f"local_tag={local_raw}\n")
+              fh.write(f"changed={'true' if changed else 'false'}\n")
+          PY
+
+      - name: Trigger Sync upstream, build APK, and release
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run sync-build-release.yml --ref "${{ github.ref_name }}"
