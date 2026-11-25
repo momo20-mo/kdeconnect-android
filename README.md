@@ -15,6 +15,17 @@ All this without wires, over the already existing Wi-Fi network, and using TLS e
 
 This is a native Android port of the KDE Connect Qt app. You will find a more complete readme about KDE Connect [here](https://invent.kde.org/network/kdeconnect-kde/).
 
+
+### Upstream and fork changes
+
+This fork builds on [Batestinha's KDE Connect Android Shizuku fork](https://github.com/Batestinha/kdeconnect-android-shizuku).
+
+Changes in this repository include:
+
+- A dedicated Shizuku user service with AIDL callbacks for privileged clipboard reads on Android 10 and later.
+- Integration with KDE Connect's clipboard listener, including propagation of Android's sensitive-clipboard flag so the existing privacy preference can be applied.
+- Retention of the `READ_LOGS` clipboard-monitoring path as a fallback when available. When Shizuku is authorized, the app can use its service without `READ_LOGS`.
+
 ## How to install this app
 
 You can install this app from the [Play Store](https://play.google.com/store/apps/details?id=org.kde.kdeconnect_tp) as well as [F-Droid](https://f-droid.org/repository/browse/?fdid=org.kde.kdeconnect_tp). Note you will also need to install the [desktop app](https://invent.kde.org/network/kdeconnect-kde) for it to work.

@@ -27,6 +27,7 @@ plugins {
 }
 
 val licenseResDir = "$projectDir/build/dependency-license-res"
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 
 kotlin {
     compilerOptions {
@@ -80,6 +81,14 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -92,6 +101,9 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (!releaseKeystorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     lint {

@@ -1,0 +1,147 @@
+name: Sync upstream, build APK, and release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPOSITORY: ${{ vars.UPSTREAM_REPOSITORY || 'KDE/kdeconnect-android' }}
+      UPSTREAM_BRANCH: ${{ vars.UPSTREAM_BRANCH || 'master' }}
+
+    steps:
+      - name: Validate dispatch branch
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != "branch" ]]; then
+            echo "::error::Run this workflow from a branch, not a tag."
+            exit 1
+          fi
+
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Merge upstream
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch upstream "$UPSTREAM_BRANCH"
+          git merge --no-edit FETCH_HEAD
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Read release version from Gradle
+        id: version
+        run: |
+          mapfile -t versions < <(sed -nE 's/^[[:space:]]*versionName = "([^"]+)"$/\1/p' build.gradle.kts)
+          if [[ "${#versions[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one versionName in build.gradle.kts."
+            exit 1
+          fi
+          VERSION="${versions[0]}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::versionName must be a version such as 1.37.3."
+            exit 1
+          fi
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install Android SDK packages
+        run: |
+          # Install the correctly named API 37.0 platform package
+          sdkmanager --channel=3 --install "platforms;android-37.0"
+          
+          # Create a symlink for compatibility with build tools expecting "android-37"
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+
+      - name: Configure release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "::error::Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD as repository secrets."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon --console=plain assembleRelease
+
+      - name: Push upstream merge to current branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth_header" \
+            push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+
+      - name: Find release APK
+        id: apk
+        run: |
+          mapfile -t apks < <(find build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print)
+          if [[ "${#apks[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one release APK, found ${#apks[@]}."
+            exit 1
+          fi
+          echo "path=${apks[0]}" >> "$GITHUB_OUTPUT"
+          echo "name=kdeconnect-android-${{ steps.version.outputs.tag }}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Move release tag to this build
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SHA: ${{ steps.sync.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag --force "$TAG" "$RELEASE_SHA"
+          auth_header="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 --wrap=0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth_header" \
+            push origin "refs/tags/$TAG" --force
+
+      - name: Create or update GitHub Release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SHA: ${{ steps.sync.outputs.sha }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --target "$RELEASE_SHA"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --target "$RELEASE_SHA"
+          fi
+          gh release upload "$TAG" "$APK_PATH#$APK_NAME" --clobber
