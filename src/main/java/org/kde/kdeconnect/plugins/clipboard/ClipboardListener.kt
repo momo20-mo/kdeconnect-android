@@ -361,12 +361,18 @@ class ClipboardListener {
 
         if (imageUri != null) {
             if (text == currentContent) return
-            updateTimestamp = System.currentTimeMillis()
-            currentContent = text
-            currentContentType = ClipboardContentType.Image
-            val snapshot = observers.toList()
-            for (observer in snapshot) {
-                observer.clipboardChanged(text, ClipboardContentType.Image)
+
+            Log.d(TAG, "Shizuku detected clipboard image; launching floating activity")
+
+            mainHandler.post {
+                try {
+                    context.startActivity(
+                        ClipboardFloatingActivity.getIntent(context, false)
+                    )
+                    Log.d(TAG, "Shizuku clipboard image: floating activity launched")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to launch floating activity for clipboard image", t)
+                }
             }
             return
         }
