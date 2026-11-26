@@ -464,7 +464,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="set_runcommand_name_as_title">set_runcommand_name_as_title</string>
     <string name="runcommand_name_as_title_title">Show name as title</string>
     <string name="runcommand_send_commands_title">Send commands to execute</string>
-    <string name="runcommand_send_commands_summary">Allow other devices to run commands on this device</string>
+    <string name="runcommand_send_commands_summary">Allow other devices to run commands on this device (use tasker text)</string>
     <string name="runcommand_send_commands_enabled_key" translatable="false">runcommand_send_commands_enabled</string>
     <string name="runcommand_local_commands_title">Commands on this device</string>
     <string name="runcommand_local_commands_category_key" translatable="false">runcommand_local_commands_category</string>
