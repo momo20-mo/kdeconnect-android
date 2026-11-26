@@ -10,16 +10,16 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
-import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
-import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import org.kde.kdeconnect_tp.BuildConfig
 import rikka.shizuku.Shizuku
@@ -33,6 +33,12 @@ class ClipboardListener {
     enum class ClipboardContentType {
         Text,
         Password,
+        Image,
+    }
+
+    sealed class ParsedClipboard {
+        data class Text(val text: String, val contentType: ClipboardContentType) : ParsedClipboard()
+        data class Image(val uri: Uri) : ParsedClipboard()
     }
 
     interface ClipboardObserver {
@@ -42,6 +48,7 @@ class ClipboardListener {
     private val observers: HashSet<ClipboardObserver> = HashSet()
 
     private val context: Context
+    private val mainHandler = Handler(Looper.getMainLooper())
     var currentContent: String? = null
         private set
     var currentContentType: ClipboardContentType = ClipboardContentType.Text
@@ -129,10 +136,10 @@ class ClipboardListener {
 
     private constructor(ctx: Context) {
         context = ctx.applicationContext
-
-        Handler(Looper.getMainLooper()).post {
-            cm = context.getSystemService<ClipboardManager>()!!
-            cm.addPrimaryClipChangedListener { this.onClipboardChanged() }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            initClipboardManager()
+        } else {
+            mainHandler.post { initClipboardManager() }
         }
         try {
             Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
@@ -142,6 +149,14 @@ class ClipboardListener {
         }
 
         ensureClipboardMonitor()
+    }
+
+    private fun initClipboardManager() {
+        if (this::cm.isInitialized) {
+            return
+        }
+        cm = context.getSystemService<ClipboardManager>()!!
+        cm.addPrimaryClipChangedListener { this.onClipboardChanged() }
     }
 
     fun registerObserver(observer: ClipboardObserver) {
@@ -344,48 +359,135 @@ class ClipboardListener {
         }
     }
 
+    @Synchronized
     fun onClipboardChanged() {
         try {
-            val clip = cm.primaryClip!!
-            val item = clip.getItemAt(0)
-            val content = item.coerceToText(context).toString()
-            val contentType = detectContentType(clip)
+            val clip = cm.primaryClip ?: return
+            when (val parsed = parseClip(clip, context)) {
+                is ParsedClipboard.Image -> {
+                    val uriString = parsed.uri.toString()
+                    if (uriString == currentContent) {
+                        return
+                    }
+                    updateTimestamp = System.currentTimeMillis()
+                    currentContent = uriString
+                    currentContentType = ClipboardContentType.Image
 
-            if (content == currentContent && contentType == currentContentType) {
-                return
-            }
-            updateTimestamp = System.currentTimeMillis()
-            currentContent = content
-            currentContentType = contentType
+                    for (observer in observers) {
+                        observer.clipboardChanged(uriString, ClipboardContentType.Image)
+                    }
+                }
+                is ParsedClipboard.Text -> {
+                    if (parsed.text == currentContent && parsed.contentType == currentContentType) {
+                        return
+                    }
+                    updateTimestamp = System.currentTimeMillis()
+                    currentContent = parsed.text
+                    currentContentType = parsed.contentType
 
-            for (observer in observers) {
-                observer.clipboardChanged(content, contentType)
+                    for (observer in observers) {
+                        observer.clipboardChanged(parsed.text, parsed.contentType)
+                    }
+                }
+                null -> return
             }
         } catch (_: Exception) {
-            // probably clipboard was not text or access was denied
+            //Probably clipboard was not readable
         }
     }
 
+    @Synchronized
     fun setText(text: String?) {
-        if (this::cm.isInitialized) {
-            if (text == currentContent) {
-                return
-            }
-            updateTimestamp = System.currentTimeMillis()
-            currentContent = text
-            currentContentType = ClipboardContentType.Text
+        if (!this::cm.isInitialized) {
+            mainHandler.post { setText(text) }
+            return
+        }
+        if (text == currentContent) {
+            return
+        }
+        updateTimestamp = System.currentTimeMillis()
+        currentContent = text
+        currentContentType = ClipboardContentType.Text
+        try {
             cm.setPrimaryClip(ClipData.newPlainText(null, text))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write text clipboard", e)
+        }
+    }
+
+    /**
+     * Updates the cached content before writing [uri] to the system clipboard so the
+     * resulting primary-clip callback is recognized as our own write and suppressed.
+     */
+    @Synchronized
+    fun setImage(uri: Uri, label: String? = null) {
+        if (!this::cm.isInitialized) {
+            mainHandler.post { setImage(uri, label) }
+            return
+        }
+        val uriString = uri.toString()
+        if (uriString == currentContent) {
+            return
+        }
+        updateTimestamp = System.currentTimeMillis()
+        currentContent = uriString
+        currentContentType = ClipboardContentType.Image
+        try {
+            cm.setPrimaryClip(ClipData.newUri(context.contentResolver, label, uri))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write image clipboard", e)
         }
     }
 
     companion object {
-        private const val TAG = "KDEClipboard"
-        private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
-
+        private const val TAG = "ClipboardListener"
         private var _instance: ClipboardListener? = null
 
         fun instance(context: Context): ClipboardListener {
             return _instance ?: ClipboardListener(context).also { _instance = it }
+        }
+
+        private fun isImageUri(uri: Uri, resolver: ContentResolver, fallback: Boolean): Boolean {
+            val mime = try {
+                resolver.getType(uri)
+            } catch (_: Exception) {
+                null
+            }
+            return mime?.startsWith("image/") ?: fallback
+        }
+
+        /**
+         * Classifies [clip] into a single readable image attachment URI, plain/sensitive text,
+         * or `null` for non-image file attachments that should not be coerced into text.
+         */
+        fun parseClip(clip: ClipData, context: Context): ParsedClipboard? {
+            if (clip.itemCount <= 0) {
+                return null
+            }
+            val items = (0 until clip.itemCount).map { clip.getItemAt(it) }
+            val attachmentUris = items.mapNotNull { it.uri }
+                .filter { it.scheme == ContentResolver.SCHEME_CONTENT || it.scheme == ContentResolver.SCHEME_FILE }
+            if (attachmentUris.isNotEmpty()) {
+                val hasImageMime = clip.description?.hasMimeType("image/*") == true
+                val isImage = attachmentUris.size == 1 && isImageUri(
+                    attachmentUris.first(),
+                    context.contentResolver,
+                    hasImageMime,
+                )
+                return if (isImage) ParsedClipboard.Image(attachmentUris.first()) else null
+            }
+
+            val firstItem = items.first()
+            if (clip.description?.hasMimeType("image/*") == true &&
+                firstItem.text == null &&
+                firstItem.htmlText == null
+            ) {
+                return null
+            }
+
+            val content = firstItem.coerceToText(context).toString()
+            val contentType = detectContentType(clip)
+            return ParsedClipboard.Text(content, contentType)
         }
 
         fun detectContentType(clip: ClipData?): ClipboardContentType {
