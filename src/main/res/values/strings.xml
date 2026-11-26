@@ -34,6 +34,13 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="clipboard_preference_key_skip_sensitive" translatable="false">clipboard_skip_sensitive_sync</string>
     <string name="clipboard_preference_title_skip_sensitive">Skip sensitive clipboard sync</string>
     <string name="clipboard_preference_summary_skip_sensitive">Don\'t auto-sync passwords or other content marked as sensitive</string>
+    <string name="clipboard_preference_category_image_sync">Clipboard image sync</string>
+    <string name="clipboard_preference_key_image_size_limit_enabled" translatable="false">clipboard_image_size_limit_enabled</string>
+    <string name="clipboard_preference_title_image_size_limit">Enable clipboard image copying</string>
+    <string name="clipboard_preference_summary_image_size_limit">Send clipboard images to device</string>
+    <string name="clipboard_preference_key_max_image_size_mb" translatable="false">maxClipboardImageSizeMB</string>
+    <string name="clipboard_preference_title_max_image_size_mb">Max image size (MB)</string>
+    <string name="clipboard_preference_summary_max_image_size_mb">Maximum PNG size to send; 0 for unlimited</string>
     <string name="pref_plugin_mousepad">Remote input</string>
     <string name="pref_plugin_mousepad_desc_nontv">Use your phone or tablet as a touchpad and keyboard</string>
     <string name="pref_plugin_mousepad_desc_tv">Use your phone or tablet as a TV remote</string>
