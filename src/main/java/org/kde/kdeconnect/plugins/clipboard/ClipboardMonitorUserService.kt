@@ -232,9 +232,12 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
     private fun clipToText(clip: ClipData): String? {
         if (clip.itemCount <= 0) return null
         val item = clip.getItemAt(0)
+        val uriText = item.uri
+            ?.takeUnless { it.scheme == "content" || it.scheme == "file" }
+            ?.toString()
         return item.text?.toString()
             ?: item.htmlText
-            ?: item.uri?.toString()
+            ?: uriText
             ?: item.intent?.toUri(0)
     }
 

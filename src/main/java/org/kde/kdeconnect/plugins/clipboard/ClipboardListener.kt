@@ -10,6 +10,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Context
 import android.content.ServiceConnection
@@ -20,6 +21,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import org.kde.kdeconnect_tp.BuildConfig
 import rikka.shizuku.Shizuku
@@ -48,7 +50,6 @@ class ClipboardListener {
     private val observers: HashSet<ClipboardObserver> = HashSet()
 
     private val context: Context
-    private val mainHandler = Handler(Looper.getMainLooper())
     var currentContent: String? = null
         private set
     var currentContentType: ClipboardContentType = ClipboardContentType.Text
@@ -84,21 +85,7 @@ class ClipboardListener {
             Log.d(TAG, "Shizuku monitor delivered clipboard text")
 
             mainHandler.post {
-                val contentType = if (isSensitive) {
-                    ClipboardContentType.Password
-                } else {
-                    ClipboardContentType.Text
-                }
-                if (text == currentContent && contentType == currentContentType) return@post
-
-                updateTimestamp = System.currentTimeMillis()
-                currentContent = text
-                currentContentType = contentType
-
-                val snapshot = observers.toList()
-                for (observer in snapshot) {
-                    observer.clipboardChanged(text, contentType)
-                }
+                onPrivilegedClipboardTextChanged(text, isSensitive)
             }
         }
     }
@@ -360,6 +347,27 @@ class ClipboardListener {
     }
 
     @Synchronized
+    private fun onPrivilegedClipboardTextChanged(text: String, isSensitive: Boolean) {
+        val contentType = if (isSensitive) {
+            ClipboardContentType.Password
+        } else {
+            ClipboardContentType.Text
+        }
+        if (text == currentContent && (contentType == currentContentType || currentContentType == ClipboardContentType.Image)) {
+            return
+        }
+
+        updateTimestamp = System.currentTimeMillis()
+        currentContent = text
+        currentContentType = contentType
+
+        val snapshot = observers.toList()
+        for (observer in snapshot) {
+            observer.clipboardChanged(text, contentType)
+        }
+    }
+
+    @Synchronized
     fun onClipboardChanged() {
         try {
             val clip = cm.primaryClip ?: return
@@ -441,6 +449,7 @@ class ClipboardListener {
 
     companion object {
         private const val TAG = "ClipboardListener"
+        private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
         private var _instance: ClipboardListener? = null
 
         fun instance(context: Context): ClipboardListener {
