@@ -234,7 +234,7 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
     /**
      * Returns the URI string of the image attachment in [clip], or null if the clip is not
      * a single-image clip. Only content:// and file:// URIs whose clip description advertises
-     * an image/* MIME type are treated as image clips.
+     * an image MIME type are treated as image clips.
      */
     private fun clipToImageUri(clip: ClipData): String? {
         if (clip.itemCount <= 0) return null
