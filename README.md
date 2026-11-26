@@ -3,6 +3,13 @@
 KDE Connect is a multi-platform app that allows your devices to communicate (eg: your phone and your computer).
 
 ## (Some) Features
+
+
+The changes to this fork:
+- A dedicated Shizuku user service with AIDL callbacks for privileged clipboard reads on Android 10 and later.
+- Add the ability to copy pictures to the clipboard
+- Add Tasker plugin can be used to transfer commands between Taskers
+
 - **Shared clipboard**: copy and paste between your phone and your computer (or any other device).
 - **Notification sync**: Read and reply to your Android notifications from the desktop.
 - **Share files and URLs** instantly from one device to another.
@@ -25,6 +32,11 @@ Changes in this repository include:
 - A dedicated Shizuku user service with AIDL callbacks for privileged clipboard reads on Android 10 and later.
 - Integration with KDE Connect's clipboard listener, including propagation of Android's sensitive-clipboard flag so the existing privacy preference can be applied.
 - Retention of the `READ_LOGS` clipboard-monitoring path as a fallback when available. When Shizuku is authorized, the app can use its service without `READ_LOGS`.
+
+其他更改
+
+- Add the ability to copy pictures to the clipboard
+- Add Tasker插件 可用于传输命令在Tasker之间 
 
 ## How to install this app
 
