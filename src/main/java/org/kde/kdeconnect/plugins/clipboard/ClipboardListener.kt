@@ -485,13 +485,42 @@ class ClipboardListener {
             return _instance ?: ClipboardListener(context).also { _instance = it }
         }
 
+        private fun extractHtmlImageUris(html: String?): List<Uri> {
+            if (html.isNullOrBlank()) return emptyList()
+
+            val pattern = Regex(
+                """(?is)<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"""
+            )
+
+            return pattern.findAll(html).mapNotNull { match ->
+                val raw = match.groupValues
+                    .drop(1)
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: return@mapNotNull null
+
+                val decoded = android.text.Html.fromHtml(raw, 0)
+                    .toString()
+                    .trim()
+
+                try {
+                    Uri.parse(decoded).takeIf { uri ->
+                        uri.scheme == ContentResolver.SCHEME_CONTENT ||
+                            uri.scheme == ContentResolver.SCHEME_FILE
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Invalid HTML image URI", e)
+                    null
+                }
+            }.distinct().toList()
+        }
+
         private fun isImageUri(uri: Uri, resolver: ContentResolver, fallback: Boolean): Boolean {
             val mime = try {
                 resolver.getType(uri)
             } catch (_: Exception) {
                 null
             }
-            return mime?.startsWith("image/") ?: fallback
+            return mime?.startsWith("image/") == true || fallback
         }
 
         /**
@@ -503,16 +532,44 @@ class ClipboardListener {
                 return null
             }
             val items = (0 until clip.itemCount).map { clip.getItemAt(it) }
-            val attachmentUris = items.mapNotNull { it.uri }
-                .filter { it.scheme == ContentResolver.SCHEME_CONTENT || it.scheme == ContentResolver.SCHEME_FILE }
+
+            // 原有直接 URI
+            val directUris = items.mapNotNull { it.uri }
+                .filter {
+                    it.scheme == ContentResolver.SCHEME_CONTENT ||
+                        it.scheme == ContentResolver.SCHEME_FILE
+                }
+
+            // 新增 HTML 内嵌图片 URI
+            val htmlImageUris = items.flatMap {
+                extractHtmlImageUris(it.htmlText)
+            }
+
+            // 合并并去重
+            val attachmentUris = (directUris + htmlImageUris).distinct()
+
             if (attachmentUris.isNotEmpty()) {
                 val hasImageMime = clip.description?.hasMimeType("image/*") == true
-                val isImage = attachmentUris.size == 1 && isImageUri(
-                    attachmentUris.first(),
-                    context.contentResolver,
-                    hasImageMime,
-                )
-                return if (isImage) ParsedClipboard.Image(attachmentUris.first()) else null
+
+                val isSingleImage = attachmentUris.size == 1
+
+                val isHtmlImage = isSingleImage &&
+                    attachmentUris.first() in htmlImageUris
+
+                val isImage = isSingleImage && (
+                    isHtmlImage ||
+                        isImageUri(
+                            attachmentUris.first(),
+                            context.contentResolver,
+                            hasImageMime,
+                        )
+                    )
+
+                return if (isImage) {
+                    ParsedClipboard.Image(attachmentUris.first())
+                } else {
+                    null
+                }
             }
 
             val firstItem = items.first()
