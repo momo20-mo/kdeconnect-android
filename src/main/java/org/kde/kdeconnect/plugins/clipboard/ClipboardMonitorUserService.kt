@@ -2,7 +2,9 @@ package org.kde.kdeconnect.plugins.clipboard
 
 import android.content.ClipData
 import android.content.ClipDescription
+import android.net.Uri
 import android.os.IBinder
+import android.text.Html
 import android.util.Log
 import org.kde.kdeconnect_tp.BuildConfig
 import java.io.BufferedReader
@@ -232,16 +234,58 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
     }
 
     /**
-     * Returns the URI string of the image attachment in [clip], or null if the clip is not
-     * a single-image clip. Only content:// and file:// URIs whose clip description advertises
-     * an image MIME type are treated as image clips.
+     * Returns the URI string of an image in [clip], or null if no image is present.
+     * Direct content:// and file:// URIs on clips advertising an image MIME type take
+     * priority; otherwise an image URI is extracted from an img src in the HTML text.
      */
     private fun clipToImageUri(clip: ClipData): String? {
         if (clip.itemCount <= 0) return null
-        val uri = clip.getItemAt(0).uri ?: return null
-        if (uri.scheme != "content" && uri.scheme != "file") return null
-        if (clip.description?.hasMimeType("image/*") != true) return null
-        return uri.toString()
+
+        // 第一优先级：保持原有直接图片 URI 处理
+        for (index in 0 until clip.itemCount) {
+            val uri = clip.getItemAt(index).uri ?: continue
+
+            if ((uri.scheme == "content" || uri.scheme == "file") &&
+                clip.description?.hasMimeType("image/*") == true
+            ) {
+                return uri.toString()
+            }
+        }
+
+        // 第二优先级：Samsung Notes HTML 内嵌图片
+        val pattern = Regex(
+            """(?is)<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"""
+        )
+
+        for (index in 0 until clip.itemCount) {
+            val html = clip.getItemAt(index).htmlText ?: continue
+
+            for (match in pattern.findAll(html)) {
+                val raw = match.groupValues
+                    .drop(1)
+                    .firstOrNull { it.isNotEmpty() }
+                    ?: continue
+
+                val decoded = Html.fromHtml(raw, 0)
+                    .toString()
+                    .trim()
+
+                val uri = try {
+                    Uri.parse(decoded)
+                } catch (e: Exception) {
+                    continue
+                }
+
+                if (uri.scheme == "content" ||
+                    uri.scheme == "file"
+                ) {
+                    Log.d(TAG, "Found image URI inside clipboard HTML")
+                    return uri.toString()
+                }
+            }
+        }
+
+        return null
     }
 
     private fun clipToText(clip: ClipData): String? {
