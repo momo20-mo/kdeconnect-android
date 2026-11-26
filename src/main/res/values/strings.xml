@@ -463,6 +463,19 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="runcommand_device_controls_summary">If your device supports Device Controls, commands you have configured will appear there.</string>
     <string name="set_runcommand_name_as_title">set_runcommand_name_as_title</string>
     <string name="runcommand_name_as_title_title">Show name as title</string>
+    <string name="runcommand_send_commands_title">Send commands to execute</string>
+    <string name="runcommand_send_commands_summary">Allow other devices to run commands on this device</string>
+    <string name="runcommand_send_commands_enabled_key" translatable="false">runcommand_send_commands_enabled</string>
+    <string name="runcommand_local_commands_title">Commands on this device</string>
+    <string name="runcommand_local_commands_category_key" translatable="false">runcommand_local_commands_category</string>
+    <string name="runcommand_add_command_key" translatable="false">runcommand_add_command</string>
+    <string name="runcommand_add_command">Add command</string>
+    <string name="runcommand_edit_command">Edit command</string>
+    <string name="runcommand_delete_command">Delete</string>
+    <string name="runcommand_command_name">Name</string>
+    <string name="runcommand_command_text">Command</string>
+    <string name="runcommand_command_name_required">Name cannot be empty</string>
+    <string name="runcommand_command_text_required">Command cannot be empty</string>
 
     <string name="pref_plugin_findremotedevice">Find remote device</string>
     <string name="pref_plugin_findremotedevice_desc">Ring your remote device</string>

@@ -29,4 +29,23 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
 
     </org.kde.kdeconnect.helpers.LongSummaryPreferenceCategory>
 
+    <PreferenceCategory
+        android:key="@string/runcommand_local_commands_category_key"
+        android:title="@string/runcommand_local_commands_title">
+
+        <SwitchPreference
+            android:id="@+id/runcommand_send_commands_enabled_preference"
+            android:defaultValue="false"
+            android:key="@string/runcommand_send_commands_enabled_key"
+            android:summary="@string/runcommand_send_commands_summary"
+            android:title="@string/runcommand_send_commands_title" />
+
+        <Preference
+            android:id="@+id/runcommand_add_command_preference"
+            android:key="@string/runcommand_add_command_key"
+            android:persistent="false"
+            android:title="@string/runcommand_add_command" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

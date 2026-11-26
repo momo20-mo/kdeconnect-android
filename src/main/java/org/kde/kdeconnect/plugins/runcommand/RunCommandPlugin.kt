@@ -9,6 +9,7 @@ package org.kde.kdeconnect.plugins.runcommand
 
 import android.app.Activity
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 import androidx.compose.runtime.MutableState
@@ -23,6 +24,7 @@ import org.kde.kdeconnect.NetworkPacket
 import org.kde.kdeconnect.helpers.JsonHelper.json
 import org.kde.kdeconnect.plugins.Plugin
 import org.kde.kdeconnect.plugins.PluginFactory.LoadablePlugin
+import org.kde.kdeconnect.plugins.taskertext.TaskerVariableEventDispatcher
 import org.kde.kdeconnect.ui.PluginSettingsFragment
 import org.kde.kdeconnect_tp.R
 
@@ -46,6 +48,13 @@ class RunCommandPlugin : Plugin() {
     private val commandLineIndexById = HashMap<Int, Int>()
 
     private var canAddCommand = false
+
+    private val localCommandsChangedListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (RunCommandLocalCommands.isRelevantPreference(context, key)) {
+                sendLocalCommandList()
+            }
+        }
 
     fun addCommandsUpdatedCallback(newCallback: CommandsChangedCallback) {
         callbacks.add(newCallback)
@@ -79,7 +88,7 @@ class RunCommandPlugin : Plugin() {
     override val settingsScope = SettingsScope.APP_WIDE
 
     override fun getSettingsFragment(activity: Activity): PluginSettingsFragment {
-        return PluginSettingsFragment.newInstance(pluginKey, device.deviceId, R.xml.runcommand_preferences)
+        return RunCommandSettingsFragment.newInstance(pluginKey, device.deviceId)
     }
 
     override fun getUiButtons(): List<PluginUiButton> {
@@ -92,10 +101,14 @@ class RunCommandPlugin : Plugin() {
     }
 
     override fun onCreate() {
+        preferences.registerOnSharedPreferenceChangeListener(localCommandsChangedListener)
         requestCommandList()
+        sendLocalCommandList()
     }
 
     override fun onDestroy() {
+        preferences.unregisterOnSharedPreferenceChangeListener(localCommandsChangedListener)
+
         // We won't get commandFinished for the commands that were running, so stop tracking them
         runningProcesses.clear()
         commandRunning.value = false
@@ -187,13 +200,30 @@ class RunCommandPlugin : Plugin() {
             }
 
             return true
+        } else if (np.type == PACKET_TYPE_RUNCOMMAND_REQUEST) {
+            if (!RunCommandLocalCommands.isEnabled(context)) {
+                return true
+            }
+            if (np.getBoolean("requestCommandList", false)) {
+                sendLocalCommandList()
+            } else {
+                val key = np.getStringOrNull("key")
+                if (key != null) {
+                    RunCommandLocalCommands.findCommand(context, key)?.let { command ->
+                        TaskerVariableEventDispatcher.dispatch(context, command.command)
+                    }
+                }
+            }
+            return true
         }
         return false
     }
 
-    override val supportedPacketTypes: Array<String> = arrayOf(PACKET_TYPE_RUNCOMMAND, PACKET_TYPE_RUNCOMMAND_OUTPUT)
+    override val supportedPacketTypes: Array<String> =
+        arrayOf(PACKET_TYPE_RUNCOMMAND, PACKET_TYPE_RUNCOMMAND_OUTPUT, PACKET_TYPE_RUNCOMMAND_REQUEST)
 
-    override val outgoingPacketTypes: Array<String> = arrayOf(PACKET_TYPE_RUNCOMMAND_REQUEST)
+    override val outgoingPacketTypes: Array<String> =
+        arrayOf(PACKET_TYPE_RUNCOMMAND_REQUEST, PACKET_TYPE_RUNCOMMAND)
 
     fun runCommand(cmdKey: String?) {
         if (cmdKey == null) return
@@ -206,6 +236,14 @@ class RunCommandPlugin : Plugin() {
     private fun requestCommandList() {
         val np = NetworkPacket(PACKET_TYPE_RUNCOMMAND_REQUEST)
         np["requestCommandList"] = true
+        device.sendPacket(np)
+    }
+
+    private fun sendLocalCommandList() {
+        if (!RunCommandLocalCommands.isEnabled(context)) return
+        val np = NetworkPacket(PACKET_TYPE_RUNCOMMAND)
+        np["commandList"] = RunCommandLocalCommands.commandsJson(context)
+        np["canAddCommand"] = true
         device.sendPacket(np)
     }
 
@@ -226,7 +264,7 @@ class RunCommandPlugin : Plugin() {
     companion object {
         const val PACKET_TYPE_RUNCOMMAND = "kdeconnect.runcommand"
         const val PACKET_TYPE_RUNCOMMAND_OUTPUT = "kdeconnect.runcommand.output"
-        private const val PACKET_TYPE_RUNCOMMAND_REQUEST = "kdeconnect.runcommand.request"
+        const val PACKET_TYPE_RUNCOMMAND_REQUEST = "kdeconnect.runcommand.request"
         const val KEY_COMMANDS_PREFERENCE = "commands_preference_"
     }
 }
