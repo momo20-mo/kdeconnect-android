@@ -348,6 +348,29 @@ class ClipboardListener {
 
     @Synchronized
     private fun onPrivilegedClipboardTextChanged(text: String, isSensitive: Boolean) {
+        // If Shizuku delivered a content:// URI, it represents an image clipboard entry.
+        // clipToImageUri() in ClipboardMonitorUserService returns such URIs for image clips.
+        val imageUri = text.takeIf { it.startsWith("content://") || it.startsWith("file://") }
+            ?.let {
+                try {
+                    Uri.parse(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+        if (imageUri != null) {
+            if (text == currentContent) return
+            updateTimestamp = System.currentTimeMillis()
+            currentContent = text
+            currentContentType = ClipboardContentType.Image
+            val snapshot = observers.toList()
+            for (observer in snapshot) {
+                observer.clipboardChanged(text, ClipboardContentType.Image)
+            }
+            return
+        }
+
         val contentType = if (isSensitive) {
             ClipboardContentType.Password
         } else {

@@ -108,7 +108,7 @@ class ClipboardPlugin : Plugin() {
         device.sendPacket(np)
     }
 
-    private fun isImageSizeLimitEnabled(): Boolean {
+    private fun isImageSyncEnabled(): Boolean {
         return preferences.getBoolean(
             context.getString(R.string.clipboard_preference_key_image_size_limit_enabled),
             true,
@@ -129,18 +129,17 @@ class ClipboardPlugin : Plugin() {
         if (!isDeviceInitialized || !device.supportsPacketType(PACKET_TYPE_CLIPBOARD_FILE)) {
             return
         }
-        val limitEnabled = isImageSizeLimitEnabled()
-        val maxImageSizeMB = getMaxImageSizeMB()
-        if (limitEnabled && maxImageSizeMB <= 0) {
+        if (!isImageSyncEnabled()) {
             return
         }
+        val maxImageSizeMB = getMaxImageSizeMB()
 
         backgroundExecutor.execute {
-            sendClipboardImageInternal(uri, limitEnabled, maxImageSizeMB)
+            sendClipboardImageInternal(uri, maxImageSizeMB)
         }
     }
 
-    private fun sendClipboardImageInternal(uri: Uri, limitEnabled: Boolean, maxImageSizeMB: Int) {
+    private fun sendClipboardImageInternal(uri: Uri, maxImageSizeMB: Int) {
         if (!isDeviceInitialized || !device.supportsPacketType(PACKET_TYPE_CLIPBOARD_FILE)) {
             return
         }
@@ -166,7 +165,7 @@ class ClipboardPlugin : Plugin() {
                 return
             }
 
-            if (limitEnabled && pngBytes.size.toLong() > maxImageSizeMB.toLong() * ONE_MB) {
+            if (maxImageSizeMB > 0 && pngBytes.size.toLong() > maxImageSizeMB.toLong() * ONE_MB) {
                 Log.i(TAG, "Skipping clipboard image (${pngBytes.size} bytes): exceeds ${maxImageSizeMB}MB limit")
                 return
             }

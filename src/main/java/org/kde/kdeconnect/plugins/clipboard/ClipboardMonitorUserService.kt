@@ -32,6 +32,7 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
     private data class ClipboardSnapshot(
         val text: String,
         val isSensitive: Boolean,
+        val isImageUri: Boolean = false,
     )
 
     private fun clipboardLogcatFilter(): String {
@@ -176,12 +177,13 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
                 val args = buildArgsFor(method.parameterTypes, pkg) ?: continue
                 try {
                     val clip = method.invoke(clipboard, *args) as? ClipData ?: continue
-                    val text = clipToText(clip) ?: continue
+                    val imageUri = clipToImageUri(clip)
+                    val text = imageUri ?: clipToText(clip) ?: continue
                     Log.d(
                         TAG,
                         "Privileged clipboard read succeeded via ${method.parameterTypes.joinToString { it.simpleName }} pkg=$pkg"
                     )
-                    return ClipboardSnapshot(text, isSensitive(clip))
+                    return ClipboardSnapshot(text, isSensitive(clip), isImageUri = imageUri != null)
                 } catch (_: Throwable) {
                 }
             }
@@ -227,6 +229,19 @@ class ClipboardMonitorUserService @JvmOverloads constructor(
         }
 
         return args
+    }
+
+    /**
+     * Returns the URI string of the image attachment in [clip], or null if the clip is not
+     * a single-image clip. Only content:// and file:// URIs whose clip description advertises
+     * an image/* MIME type are treated as image clips.
+     */
+    private fun clipToImageUri(clip: ClipData): String? {
+        if (clip.itemCount <= 0) return null
+        val uri = clip.getItemAt(0).uri ?: return null
+        if (uri.scheme != "content" && uri.scheme != "file") return null
+        if (clip.description?.hasMimeType("image/*") != true) return null
+        return uri.toString()
     }
 
     private fun clipToText(clip: ClipData): String? {
